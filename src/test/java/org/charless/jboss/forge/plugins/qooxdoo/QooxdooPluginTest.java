@@ -17,7 +17,10 @@ public class QooxdooPluginTest extends AbstractShellTest
    @Test
    public void testDefaultCommand() throws Exception
    {
-      //getShell().execute("qooxdoo");
+//	   getShell().execute("");
+	   
    }
+   
+   
 
 }

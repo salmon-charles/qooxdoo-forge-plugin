@@ -1,12 +1,17 @@
 package org.charless.jboss.forge.plugins.qooxdoo;
 
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import javax.enterprise.event.Observes;
 import javax.inject.Inject;
-import javax.persistence.Entity;
 
+import org.apache.maven.model.Build;
 import org.apache.maven.model.Model;
 import org.jboss.forge.maven.MavenCoreFacet;
 import org.jboss.forge.maven.MavenPluginFacet;
@@ -18,14 +23,15 @@ import org.jboss.forge.project.dependencies.Dependency;
 import org.jboss.forge.project.dependencies.DependencyBuilder;
 import org.jboss.forge.project.facets.BaseFacet;
 import org.jboss.forge.project.facets.DependencyFacet;
-import org.jboss.forge.resources.Resource;
+import org.jboss.forge.resources.DirectoryResource;
+import org.jboss.forge.resources.FileResource;
 import org.jboss.forge.resources.java.JavaResource;
 import org.jboss.forge.shell.Shell;
 import org.jboss.forge.shell.ShellMessages;
-import org.jboss.forge.shell.events.CommandExecuted;
-import org.jboss.forge.shell.events.CommandExecuted.Status;
-import org.jboss.forge.shell.plugins.Current;
 import org.jboss.forge.shell.plugins.RequiresFacet;
+
+import freemarker.template.Template;
+import freemarker.template.TemplateException;
 
 /**
  * The Qooxdoo facet handles the installation of the Qooxdoo frameworks 
@@ -50,7 +56,8 @@ public class QooxdooFacet extends BaseFacet {
 			.setArtifactId("qooxdoo-sdk");
 	
 	private final static String QOOXDOO_VERSION_PROPERTY_NAME = "qooxdoo.sdk.version";
-					
+	private final static String QOOXDOO_APPSOURCES_PROPERTY_NAME = "qooxdoo.application.sourcesDirectory";	
+	private final static String QOOXDOO_APPNAMESPACE_PROPERTY_NAME = "{qooxdoo.application.namespace";	
 	
 	@Override
 	public boolean install() {
@@ -102,6 +109,43 @@ public class QooxdooFacet extends BaseFacet {
 		return true;
 	}
 	
+	public void createOrUpdateRestEndpoint(JavaClass entity, JavaResource endpoint ) throws FileNotFoundException
+	{
+		String entityTable = QooxdooHelpers.getEntityTable(entity);
+		String endpointName = entityTable+"Endpoint";	 
+        String idType = QooxdooHelpers.resolveIdType(entity);
+        String idSetterName = QooxdooHelpers.resolveIdSetterName(entity);
+        String idGetterName = QooxdooHelpers.resolveIdGetterName(entity);
+        Map<Object, Object> map = new HashMap<Object, Object>();
+	    map.put("entity", entity);
+	    map.put("javaEndpoint", endpoint.getJavaSource().getQualifiedName());
+	    map.put("idType", idType);
+	    map.put("setIdStatement", idSetterName);
+	    map.put("getIdStatement", idGetterName); 
+	    map.put("entityTable", entityTable);
+	    map.put("resourcePath", entityTable.toLowerCase() + "s");
+	    map.put("package", getApplicationNamespace()+".rest."+entityTable+"Endpoint");
+	    /* TODO: handles contentType ?
+	    	map.put("contentType", "contentType"); */
+	
+        Writer output = new StringWriter();
+        try {
+            Template templateFile = QooxdooHelpers.getFreemarkerConfig().getTemplate("org/charless/jboss/forge/plugins/qooxdoo/Endpoint.js");
+            templateFile.process(map, output);
+            output.flush();
+         } catch (IOException ioEx) {
+            throw new RuntimeException(ioEx);
+         } catch (TemplateException templateEx) {
+            throw new RuntimeException(templateEx);
+         }
+	    
+        DirectoryResource endpointDir = getApplicationSourceFolder().getChildDirectory("rest");
+        endpointDir.mkdirs();
+        
+        FileResource<FileResource<?>> qxEndpoint = (FileResource<FileResource<?>>) endpointDir.getChild(endpointName+".js");
+        qxEndpoint.setContents(output.toString());
+	}
+	
 	@Override
 	public boolean isInstalled() {
 		MavenPluginFacet pluginFacet = project.getFacet(MavenPluginFacet.class);
@@ -127,6 +171,34 @@ public class QooxdooFacet extends BaseFacet {
 		return true;
 	}
 	
+	public DirectoryResource getApplicationSourceFolder()
+	   {
+	      MavenCoreFacet mavenFacet = project.getFacet(MavenCoreFacet.class);
+	      Model pom = mavenFacet.getPOM();
+	      String srcFolderName = (String)pom.getProperties().get(QOOXDOO_APPSOURCES_PROPERTY_NAME);
+	      if (srcFolderName == null) {
+		      Build build = mavenFacet.getPOM().getBuild();
+		      if (build != null && build.getSourceDirectory() != null)
+		      {
+		         srcFolderName = build.getSourceDirectory();
+		      }
+		      else
+		      {
+		         srcFolderName = "src" + File.separator + "main" + File.separator + "qooxdoo";
+		      }
+	      }
+	      DirectoryResource projectRoot = project.getProjectRoot();
+	      return projectRoot.getChildDirectory(srcFolderName).getChildDirectory(getApplicationNamespace());
+	   }
+	
+	public String getApplicationNamespace()
+	   {
+	      MavenCoreFacet mavenFacet = project.getFacet(MavenCoreFacet.class);
+	      Model pom = mavenFacet.getPOM();
+	      String namespace = (String)pom.getProperties().get(QOOXDOO_APPNAMESPACE_PROPERTY_NAME);
+	      if (namespace == null) { namespace = pom.getArtifactId();}
+	      return namespace;
+	   }
 	
 
 }
